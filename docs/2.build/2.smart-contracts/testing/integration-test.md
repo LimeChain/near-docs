@@ -358,7 +358,174 @@ Now you'll also want to add a `test:testnet` script to your `package.json`'s `sc
 
 </Tabs>
 
----
+## Example of Testnet Usage
+
+<Tabs groupId="code-tabs">
+<TabItem value="js" label="🌐 JavaScript"  default>
+
+### 1. Create a `Worker`.
+
+```ts
+const worker = await Worker.init();
+```
+
+`Worker.init` creates a unique testnet account as root account.
+
+### 2. Write tests.
+
+```ts
+await Promise.all([
+  async () => {
+    await alice.call(contract, "some_update_function", {
+      some_string_argument: "cool",
+      some_number_argument: 42,
+    });
+    const result = await contract.view("some_view_function", {
+      account_id: alice,
+    });
+    assert.equal(result, "whatever");
+  },
+  async () => {
+    const result = await contract.view("some_view_function", {
+      account_id: alice,
+    });
+    assert.equal(result, "some default");
+  },
+]);
+```
+
+Note: Sometimes account creation rate limits are reached on `testnet`, simply wait a little while and try again.
+
+## Running tests only in Sandbox
+
+If some of your runs take advantage of Sandbox-specific features, you can skip these on testnet in two ways:
+
+#### 1. You can skip entire sections of your files by checking `getNetworkFromEnv() === 'sandbox'`.
+
+```ts
+let worker = Worker.init();
+// things make sense to any network
+const root = worker.rootAccount;
+const alice = await root.createSubAccount("alice");
+
+if (getNetworkFromEnv() === "sandbox") {
+  // thing that only makes sense with sandbox
+}
+```
+
+</TabItem>
+
+</Tabs>
+
+# Pro Tips
+
+- `NEAR_WORKSPACES_DEBUG=true` – run tests with this environment variable set to get copious debug output and a full log file for each Sandbox instance.
+
+- `Worker.init` [config](https://github.com/near/workspaces-js/blob/main/packages/js/src/interfaces.ts) – you can pass a config object as the first argument to `Worker.init`. This lets you do things like:
+
+  - skip initialization if specified data directory already exists (the default behavior)
+
+    ```ts
+    Worker.init({ rm: false, homeDir: "./test-data/alice-owns-an-nft" });
+    ```
+
+  - always recreate such data directory instead with `rm: true`
+
+  - specify which port to run on
+
+  - and more!
+
+## Example for `near-workspaces-js` with `near-sdk-js`.
+
+This guide will walk you through setting up and running `tests` for your `NEAR` contracts using `near-workspaces-js` in a `near-sdk-js` project. We will use the `benchmark` package from `near-sdk-js`, which includes scripts for building contracts, running tests, and generating reports.
+
+`near-sdk-js` utilizes `ava` package for testing, so we will use it for the example:
+
+1. Set up - Make sure `ava` and `near-workspaces` are added in your project.
+
+2. Worker instance - import and Initialize a `Worker`.
+
+3. Root account - set the `.rootAccount` from the `Worker`.
+
+4. Create the sub accounts, command is - `.createSubAccount`.
+
+5. Deploy the contracts, the commands are - `root.devDeploy` or `.deploy`
+
+6. Test framework integration - in our case `ava` contains a `test.context`, in there a data can be saved and reused in the other tests.
+
+7. Tearing down - At the end of test, call `await worker.tearDown()` to shut down the `Worker` if needed.
+
+<Tabs groupId="code-tabs">
+<TabItem value="js" label="🌐 JavaScript"  default>
+
+#### Example test structure:
+
+```ts
+/** Set up */
+import { Worker } from "near-workspaces";
+import test from "ava";
+import { generateGasObject, logTestResults } from "./util.js";
+import { addTestResults } from "./results-store.js";
+
+test.before(async (t) => {
+  /** Worker instance */
+  const worker = await Worker.init();
+  /** Root account */
+  const root = worker.rootAccount;
+
+  /** Create the sub accounts */
+  const callerContract = await root.createSubAccount("caller", {
+    initialBalance: "1000N",
+  });
+  /** Deploy the contracts */
+  await callerContract.deploy("build/deploy-contract.wasm");
+
+  const callerContractRs = await root.createSubAccount("callrs", {
+    initialBalance: "1000N",
+  });
+  await callerContractRs.deploy("res/deploy_contract.wasm");
+
+  const ali = await root.createSubAccount("ali");
+  const bob = await root.createSubAccount("bob");
+  const carl = await root.createSubAccount("carl");
+
+  /** Test framework integration */
+  t.context.worker = worker;
+  t.context.accounts = {
+    root,
+    callerContract,
+    ali,
+    bob,
+    carl,
+    callerContractRs,
+  };
+});
+
+test("JS promise batch deploy contract and call", async (t) => {
+  const { bob, callerContract } = t.context.accounts;
+
+  let r = await bob.callRaw(callerContract, "deploy_contract", "", {
+    gas: "300 Tgas",
+  });
+
+  let deployed = callerContract.getSubAccount("a");
+
+  t.deepEqual(JSON.parse(Buffer.from(r.result.status.SuccessValue, "base64")), {
+    currentAccountId: deployed.accountId,
+    signerAccountId: bob.accountId,
+    predecessorAccountId: callerContract.accountId,
+    input: "abc",
+  });
+
+  logTestResults(r);
+  const gasObject = generateGasObject(r);
+  addTestResults("JS_promise_batch_deploy_contract_and_call", gasObject);
+});
+```
+
+</TabItem>
+
+</Tabs>
 
 ## Additional Media
 
